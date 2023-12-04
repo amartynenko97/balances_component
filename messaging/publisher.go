@@ -16,8 +16,8 @@ func NewPublisher(channel *amqp.Channel) *Publisher {
 	}
 }
 
-func (p *Publisher) PublishCreateAccountBalancesToHttpApi(protoData []byte) error {
-	return p.publish(protoData, constants.ExNameBalances, constants.RkCreateAccountBalanceResponse)
+func (p *Publisher) PublishCreateAccountToHttpApi(protoData []byte) error {
+	return p.publish(protoData, constants.ExNameBalances, constants.RkCreateAccountResponse)
 }
 
 func (p *Publisher) PublishGetAccountBalancesToHttpApi(protoData []byte) error {

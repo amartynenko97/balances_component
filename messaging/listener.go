@@ -16,8 +16,8 @@ func NewListener(channel *amqp.Channel) *Listener {
 	}
 }
 
-func (l *Listener) ConsumeCreateAccountBalancesFromHttpApi() <-chan amqp.Delivery {
-	return l.consume(constants.CreateAccountBalanceRequestQueue)
+func (l *Listener) ConsumeCreateAccountFromHttpApi() <-chan amqp.Delivery {
+	return l.consume(constants.CreateAccountRequestQueue)
 }
 
 func (l *Listener) ConsumeGetAccountBalancesFromHttpApi() <-chan amqp.Delivery {

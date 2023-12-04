@@ -2,24 +2,29 @@ package handler
 
 import (
 	"balances_component/messaging"
+	"balances_component/protofile"
 	"errors"
+	"github.com/golang/protobuf/jsonpb"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
-	"log"
 )
 
 type BalancesHandler struct {
 	publishingChannel messaging.PublishingChannel
 	listeningChannel  messaging.ListeningChannel
 	logger            *logrus.Logger
+	dbPool            *pgxpool.Pool
 }
 
-func NewBalancesHandler(logger *logrus.Logger, publishingChannel messaging.PublishingChannel, listeningChannel messaging.ListeningChannel) *BalancesHandler {
+func NewBalancesHandler(logger *logrus.Logger, publishingChannel messaging.PublishingChannel, listeningChannel messaging.ListeningChannel, connPool *pgxpool.Pool) *BalancesHandler {
 	return &BalancesHandler{
 		logger:            logger,
 		publishingChannel: publishingChannel,
 		listeningChannel:  listeningChannel,
+		dbPool:            connPool,
 	}
 }
 
@@ -36,7 +41,7 @@ func (h *BalancesHandler) StartListener(ctx context.Context) error {
 
 	case err := <-errCh:
 		if err != nil {
-			log.Println("Error in StartConsumer:", err)
+			logrus.Println("Error in StartConsumer:", err)
 		}
 		return err
 	}
@@ -48,10 +53,9 @@ func (h *BalancesHandler) StartConsumer(ctx context.Context, errCh chan<- error)
 		case <-ctx.Done():
 			return nil
 
-		case delivery := <-h.listeningChannel.ConsumeCreateAccountBalancesFromHttpApi():
+		case delivery := <-h.listeningChannel.ConsumeCreateAccountFromHttpApi():
 			go func(delivery amqp.Delivery) {
-				if err := h.processCreateAccountBalance(delivery.Body); err != nil {
-					logrus.Infoln("Error in processCreateAccountBalance:", err)
+				if err := h.processCreateAccount(delivery.Body); err != nil {
 					errCh <- err
 				}
 			}(delivery)
@@ -59,7 +63,6 @@ func (h *BalancesHandler) StartConsumer(ctx context.Context, errCh chan<- error)
 		case delivery := <-h.listeningChannel.ConsumeGetAccountBalancesFromHttpApi():
 			go func(delivery amqp.Delivery) {
 				if err := h.processGetAccountBalance(delivery.Body); err != nil {
-					logrus.Infoln("Error in processGetAccountBalance:", err)
 					errCh <- err
 				}
 			}(delivery)
@@ -67,34 +70,30 @@ func (h *BalancesHandler) StartConsumer(ctx context.Context, errCh chan<- error)
 	}
 }
 
-func (h *BalancesHandler) processCreateAccountBalance(protoData []byte) error {
-	// Ваш код обработки CreateAccountBalance
-	// ...
-	// Если произошла ошибка
-	return errors.New("some error occurred")
+func (h *BalancesHandler) processCreateAccount(protoData []byte) error {
+	var request protofile.CreateAccountRequest
+
+	if err := jsonpb.UnmarshalString(string(protoData), &request); err != nil {
+		logrus.WithError(err).Error("Error unmarshalling proto data")
+		return err
+	}
+	request.UserId = uuid.New().String()
+
+	conn, err := h.dbPool.Acquire(context.Background())
+	if err != nil {
+		logrus.WithError(err).Error("Error acquiring database connection")
+		return err
+	}
+	defer conn.Release()
+
+	if err := createAccount(conn, &request); err != nil {
+		logrus.WithError(err).Error("Error creating account")
+		return err
+	}
+
+	return nil
 }
 
 func (h *BalancesHandler) processGetAccountBalance(protoData []byte) error {
-	// Ваш код обработки GetAccountBalance
-	// ...
-	// Если произошла ошибка
 	return errors.New("some error occurred")
 }
-
-//func (h *BalancesHandler) processCreateAccountBalance(protoData []byte) {
-//	errorResponse := constants.ErrorResponse{
-//		Error: string(constants.NoSuchCurrency),
-//	}
-//
-//	errorJSON, err := json.Marshal(errorResponse)
-//	if err != nil {
-//		logrus.Errorf("Error marshalling error response: %v", err)
-//		return
-//	}
-//
-//	err = h.publishingChannel.PublishCreateAccountBalancesToHttpApi(errorJSON)
-//	if err != nil {
-//		logrus.Errorf("Error publishing error response: %v", err)
-//		return
-//	}
-//}

@@ -1,9 +1,9 @@
 package constants
 
 const (
-	ExNameBalances                   = "e.balances.forward"
-	CreateAccountBalanceRequestQueue = "q.balances.request.CreateAccountBalanceRequest"
-	RkCreateAccountBalanceResponse   = "r.balances.#.CreateAccountBalanceResponse.#"
+	ExNameBalances            = "e.balances.forward"
+	CreateAccountRequestQueue = "q.balances.request.CreateAccountRequest"
+	RkCreateAccountResponse   = "r.balances.#.CreateAccountResponse.#"
 
 	GetAccountBalanceRequestQueue  = "q.balances.request.GetAccountBalanceRequest"
 	GetAccountBalanceResponseQueue = "q.balances.request.GetAccountBalanceResponse"
