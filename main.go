@@ -6,6 +6,9 @@ import (
 	"balances_component/logger"
 	"balances_component/messaging"
 	"golang.org/x/net/context"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
@@ -20,6 +23,7 @@ func main() {
 		logger.Fatal("Failed to initialize MessageBroker:", err)
 		return
 	}
+	defer messageBroker.Close()
 
 	dbPool, err := database.GetConnection(context.Background(), "postgres://postgre:admin@postgres:5432/balances", logger)
 	if err != nil {
@@ -28,8 +32,8 @@ func main() {
 	}
 	defer dbPool.Close()
 
-	defer messageBroker.Close()
-
+	shutdownChan := make(chan os.Signal, 1)
+	signal.Notify(shutdownChan, os.Interrupt, syscall.SIGTERM)
 	balancesHandler := handler.NewBalancesHandler(logger, messageBroker.GetPublishingChannel(), messageBroker.GetListeningChannel(), dbPool)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -41,4 +45,8 @@ func main() {
 			cancel()
 		}
 	}()
+
+	<-shutdownChan
+	cancel()
+	logger.Info("Shutting down gracefully...")
 }
