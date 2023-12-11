@@ -1,15 +1,16 @@
 package handler
 
 import (
+	"balances_component/constants"
 	"balances_component/messaging"
 	"balances_component/protofile"
-	"errors"
 	"github.com/golang/protobuf/jsonpb"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/sirupsen/logrus"
 	"github.com/streadway/amqp"
 	"golang.org/x/net/context"
+	"google.golang.org/protobuf/proto"
 )
 
 type BalancesHandler struct {
@@ -17,6 +18,12 @@ type BalancesHandler struct {
 	listeningChannel  messaging.ListeningChannel
 	logger            *logrus.Logger
 	dbPool            *pgxpool.Pool
+	messageQueue      chan Message
+}
+
+type Message struct {
+	QueueType string
+	Delivery  amqp.Delivery
 }
 
 func NewBalancesHandler(logger *logrus.Logger, publishingChannel messaging.PublishingChannel, listeningChannel messaging.ListeningChannel, connPool *pgxpool.Pool) *BalancesHandler {
@@ -25,6 +32,7 @@ func NewBalancesHandler(logger *logrus.Logger, publishingChannel messaging.Publi
 		publishingChannel: publishingChannel,
 		listeningChannel:  listeningChannel,
 		dbPool:            connPool,
+		messageQueue:      make(chan Message),
 	}
 }
 
@@ -32,7 +40,25 @@ func (h *BalancesHandler) StartListener(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
 	go func() {
-		errCh <- h.StartConsumer(ctx, errCh)
+		stopCh := make(chan struct{})
+		defer close(stopCh)
+
+		createAccountMessages := h.listeningChannel.ConsumeCreateAccountFromHttpApi(stopCh)
+		getAccountBalancesMessages := h.listeningChannel.ConsumeGetAccountBalancesFromHttpApi(stopCh)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case delivery := <-createAccountMessages:
+				h.messageQueue <- Message{QueueType: constants.QueueTypeCreateAccount, Delivery: delivery}
+
+			case delivery := <-getAccountBalancesMessages:
+				h.messageQueue <- Message{QueueType: constants.QueueTypeGetAccountBalances, Delivery: delivery}
+
+			}
+		}
 	}()
 
 	select {
@@ -41,32 +67,9 @@ func (h *BalancesHandler) StartListener(ctx context.Context) error {
 
 	case err := <-errCh:
 		if err != nil {
-			logrus.Println("Error in StartConsumer:", err)
+			logrus.Println("Error in StartListener:", err)
 		}
 		return err
-	}
-}
-
-func (h *BalancesHandler) StartConsumer(ctx context.Context, errCh chan<- error) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-
-		case delivery := <-h.listeningChannel.ConsumeCreateAccountFromHttpApi():
-			go func(delivery amqp.Delivery) {
-				if err := h.processCreateAccount(delivery.Body); err != nil {
-					errCh <- err
-				}
-			}(delivery)
-
-		case delivery := <-h.listeningChannel.ConsumeGetAccountBalancesFromHttpApi():
-			go func(delivery amqp.Delivery) {
-				if err := h.processGetAccountBalance(delivery.Body); err != nil {
-					errCh <- err
-				}
-			}(delivery)
-		}
 	}
 }
 
@@ -77,23 +80,38 @@ func (h *BalancesHandler) processCreateAccount(protoData []byte) error {
 		logrus.WithError(err).Error("Error unmarshalling proto data")
 		return err
 	}
+
 	request.UserId = uuid.New().String()
 
 	conn, err := h.dbPool.Acquire(context.Background())
 	if err != nil {
 		logrus.WithError(err).Error("Error acquiring database connection")
-		return err
+		return h.publishBalanceError(protofile.BalancesErrorCodes_BALANCE_ERROR_CODE_INTERNAL, "Internal error")
 	}
 	defer conn.Release()
 
 	if err := createAccount(conn, &request); err != nil {
 		logrus.WithError(err).Error("Error creating account")
-		return err
+		return h.publishBalanceError(protofile.BalancesErrorCodes_BALANCE_ERROR_CODE_INTERNAL, "Internal error")
 	}
 
 	return nil
 }
 
-func (h *BalancesHandler) processGetAccountBalance(protoData []byte) error {
-	return errors.New("some error occurred")
+func (h *BalancesHandler) publishBalanceError(errorCode protofile.BalancesErrorCodes, message string) error {
+	errorMessage := &protofile.BalanceErrorMessage{}
+
+	protoData, err := proto.Marshal(errorMessage)
+	if err != nil {
+		logrus.WithError(err).Error("Error marshalling balance error message")
+		return err
+	}
+
+	err = h.publishingChannel.PublishCreateAccountToHttpApi(protoData)
+	if err != nil {
+		logrus.WithError(err).Error("Error publishing balance error message")
+		return err
+	}
+
+	return nil
 }

@@ -1,6 +1,7 @@
 package balances
 
 import (
+	"balances_component/config"
 	"balances_component/database"
 	"balances_component/handler"
 	"balances_component/logger"
@@ -15,7 +16,7 @@ func main() {
 	logger := logger.SetupLogger()
 
 	rabbitMQConfig := messaging.RabbitMQConfig{
-		URL: "amqp://admin:admin@rabbitmq:5672",
+		URL: config.RabbitConfig,
 	}
 
 	messageBroker, err := messaging.NewMessageBroker(rabbitMQConfig)
@@ -25,7 +26,7 @@ func main() {
 	}
 	defer messageBroker.Close()
 
-	dbPool, err := database.GetConnection(context.Background(), "postgres://postgre:admin@postgres:5432/balances", logger)
+	dbPool, err := database.GetConnection(context.Background(), config.PostgresConfig, logger)
 	if err != nil {
 		logger.WithError(err).Fatal("Failed to initialize PostgreSQL connection pool")
 		return

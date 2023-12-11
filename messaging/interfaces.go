@@ -10,6 +10,6 @@ type PublishingChannel interface {
 }
 
 type ListeningChannel interface {
-	ConsumeCreateAccountFromHttpApi() <-chan amqp.Delivery
-	ConsumeGetAccountBalancesFromHttpApi() <-chan amqp.Delivery
+	ConsumeCreateAccountFromHttpApi(stopCh <-chan struct{}) <-chan amqp.Delivery
+	ConsumeGetAccountBalancesFromHttpApi(stopCh <-chan struct{}) <-chan amqp.Delivery
 }
